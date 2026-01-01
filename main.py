@@ -38,10 +38,38 @@ class TelegramTTSBot:
             application: Экземпляр Application бота
         """
         try:
+            import asyncio
             bot = application.bot
             
-            # Получаем текущие команды бота
-            current_commands = await bot.get_my_commands()
+            # Получаем текущие команды бота с таймаутом
+            try:
+                current_commands = await asyncio.wait_for(
+                    bot.get_my_commands(),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Таймаут при получении команд бота, устанавливаем без проверки")
+                # Устанавливаем команды без проверки
+                try:
+                    await asyncio.wait_for(
+                        bot.set_my_commands(self.BOT_COMMANDS),
+                        timeout=10.0
+                    )
+                    logger.info("Команды бота установлены без проверки")
+                except asyncio.TimeoutError:
+                    logger.warning("Таймаут при установке команд, пропускаем")
+                return
+            except Exception as e:
+                logger.warning(f"Ошибка при получении команд: {e}, устанавливаем без проверки")
+                try:
+                    await asyncio.wait_for(
+                        bot.set_my_commands(self.BOT_COMMANDS),
+                        timeout=10.0
+                    )
+                    logger.info("Команды бота установлены без проверки")
+                except Exception:
+                    logger.warning("Не удалось установить команды, пропускаем")
+                return
             
             # Проверяем, нужно ли обновить команды
             needs_update = False
@@ -79,11 +107,19 @@ class TelegramTTSBot:
             
             # Обновляем команды, если нужно
             if needs_update:
-                await bot.set_my_commands(self.BOT_COMMANDS)
-                logger.info(f"✅ Команды бота успешно обновлены: {[cmd.command for cmd in self.BOT_COMMANDS]}")
+                try:
+                    await asyncio.wait_for(
+                        bot.set_my_commands(self.BOT_COMMANDS),
+                        timeout=10.0
+                    )
+                    logger.info(f"✅ Команды бота успешно обновлены: {[cmd.command for cmd in self.BOT_COMMANDS]}")
+                except asyncio.TimeoutError:
+                    logger.warning("Таймаут при установке команд бота, но бот продолжит работу")
             else:
                 logger.info("✅ Команды бота актуальны, обновление не требуется")
                 
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при установке команд бота, но бот продолжит работу")
         except Exception as e:
             logger.error(f"❌ Ошибка при установке команд бота: {e}")
             # Не прерываем запуск бота, если не удалось установить команды
@@ -287,7 +323,14 @@ class TelegramTTSBot:
         
         # Callback для установки команд после инициализации
         async def post_init(application: Application):
-            await self.setup_commands(application)
+            # Устанавливаем команды в фоне, не блокируя запуск
+            import asyncio
+            try:
+                # Небольшая задержка для полной инициализации
+                await asyncio.sleep(1)
+                await self.setup_commands(application)
+            except Exception as e:
+                logger.warning(f"Не удалось установить команды при запуске: {e}, бот продолжит работу")
         
         # Создание приложения с post_init callback
         application = (
